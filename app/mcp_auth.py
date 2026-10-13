@@ -120,9 +120,3 @@ def verify_mcp_token(
         return None
     return Identity(subject, "officer", client_id, expires_at, kind, jti,
                     officer_username=subject.split(":", 1)[1])
-
-
-
-
-
- git commit -m "I have added a oath verification layer(mcp_auth.py)  this function accepts a token and verifies it against the portal public signing key: this stops an officer token being accepted by the citezen service or vice versa, this prevent  "                     
