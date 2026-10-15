@@ -27,7 +27,44 @@ services:
     volumes:
       - uploads:/var/sewasetu/uploads
       - applogs:/var/log/sewasetu
+      
+  mcp-citizen:
+    build: ./app
+    command:
+      - uvicorn
+      - mcp_citizen:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8011"
+    environment:
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?Set PUBLIC_BASE_URL}
+      MCP_JWKS_URL: ${MCP_JWKS_URL:?Set MCP_JWKS_URL}
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD}
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY}
+    depends_on:
+      - db
+    expose:
+      - "8011"
 
+  mcp-officer:
+    build: ./app
+    command:
+      - uvicorn
+      - mcp_officer:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8012"
+    environment:
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?Set PUBLIC_BASE_URL}
+      MCP_JWKS_URL: ${MCP_JWKS_URL:?Set MCP_JWKS_URL}
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD}
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY}
+    depends_on:
+      - db
+    expose:
+      - "8012"
   scheduler:
     build: ./app
     # Run the deemed-approval job once at startup (so a freshly restored
