@@ -4,7 +4,7 @@ services:
     environment:
       POSTGRES_DB: sewasetu
       POSTGRES_USER: sewasetu
-      POSTGRES_PASSWORD: sewasetu123
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in your .env}
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./app/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
@@ -16,10 +16,10 @@ services:
       - "8000:8000"
     environment:
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-change-me-before-deploying}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in your .env}
       SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in your .env}
       DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in your .env}
-      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8000}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?Set PUBLIC_BASE_URL in your .env}
       OAUTH_CIMD_ALLOWED_HOSTS: ${OAUTH_CIMD_ALLOWED_HOSTS:-}
     depends_on:
       - db
@@ -79,12 +79,50 @@ services:
 
   smsgw:
     build: ./smsgw
-    # internal only — reached by the app over the docker network and exposed to
-    # users via the app at /__gateway/ (so no second host port is needed)
+    # internal only — reached by the app over the Docker network
     expose:
       - "8025"
+
+  eval-dashboard:
+    build: ./app
+    command:
+      - gunicorn
+      - --bind
+      - 0.0.0.0:8030
+      - --workers
+      - "1"
+      - eval_dashboard:app
+    environment:
+      EVAL_REPORT_DIR: /var/sewasetu/eval-reports
+      EVAL_DASHBOARD_USERNAME: ${EVAL_DASHBOARD_USERNAME:?Set evaluation username}
+      EVAL_DASHBOARD_PASSWORD: ${EVAL_DASHBOARD_PASSWORD:?Set evaluation password}
+    volumes:
+      - evalreports:/var/sewasetu/eval-reports:ro
+    expose:
+      - "8030"
+
+  # Step 5 — Deployment-only MCP Evaluation Runner
+  eval-runner:
+    build: ./app
+    profiles:
+      - evaluation
+    command:
+      - python
+      - eval_runner.py
+    environment:
+      EVAL_CITIZEN_URL: ${EVAL_CITIZEN_URL:?Set Citizen MCP URL}
+      EVAL_OFFICER_URL: ${EVAL_OFFICER_URL:?Set Officer MCP URL}
+      EVAL_CITIZEN_A_TOKEN: ${EVAL_CITIZEN_A_TOKEN:?Set Citizen A token}
+      EVAL_CITIZEN_B_TOKEN: ${EVAL_CITIZEN_B_TOKEN:?Set Citizen B token}
+      EVAL_OFFICER_TOKEN: ${EVAL_OFFICER_TOKEN:?Set Officer token}
+      EVAL_CITIZEN_A_APPLICATION_NO: ${EVAL_CITIZEN_A_APPLICATION_NO:-}
+      EVAL_CITIZEN_A_EXPECTED_STATUS: ${EVAL_CITIZEN_A_EXPECTED_STATUS:-}
+      EVAL_REPORT_DIR: /var/sewasetu/eval-reports
+    volumes:
+      - evalreports:/var/sewasetu/eval-reports
 
 volumes:
   pgdata:
   uploads:
   applogs:
+  evalreports:
