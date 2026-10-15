@@ -1,0 +1,28 @@
+
+{$PUBLIC_HOSTNAME} {
+    encode gzip
+
+    # Citizen MCP endpoint.
+    # Internally, the standalone SDK app handles /mcp.
+    @citizen path /mcp/citizen
+    handle @citizen {
+        rewrite * /mcp
+        reverse_proxy mcp-citizen:8011 {
+            flush_interval -1
+        }
+    }
+
+    # Officer MCP endpoint.
+    @officer path /mcp/officer
+    handle @officer {
+        rewrite * /mcp
+        reverse_proxy mcp-officer:8012 {
+            flush_interval -1
+        }
+    }
+
+    # Existing Flask portal, OAuth and discovery routes.
+    handle {
+        reverse_proxy app:8000
+    }
+}
