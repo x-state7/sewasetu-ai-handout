@@ -38,8 +38,9 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from flask import (Blueprint, request, jsonify, redirect, render_template, session,
                    flash, url_for, abort)
-
 import app as portal
+from security_otp import issue_otp, verify_otp
+from security_urls import allowed_client_metadata_url
 
 oauth = Blueprint("oauth", __name__)
 
@@ -213,9 +214,20 @@ def load_client(client_id):
         cur.close(); conn.close()
         return {"client_id": row[0], "client_name": row[1], "redirect_uris": row[2],
                 "secret_hash": row[3], "kind": row[4]}
-    if _is_url_client(client_id):
+    if _is_url_client(client_id) and allowed_client_metadata_url(client_id):
         try:
-            doc = http.get(client_id, timeout=5, headers={"Accept": "application/json"}).json()
+            response = http.get(client_id, timeout=(2, 4),
+                                allow_redirects=False,
+                                headers={"Accept": "application/json"}, stream=True)
+            if response.status_code != 200 or int(response.headers.get("Content-Length", "0")) > 65536:
+                response.close()
+                raise ValueError("Metadata fetch refused")
+            with response:
+                body = response.raw.read(65537)
+            if len(body) > 65536:
+                raise ValueError("Client metadata too large")
+            doc = json.loads(body)
+        
         except Exception:
             cur.close(); conn.close()
             return None
@@ -359,14 +371,7 @@ def login():
             if request.form.get("otp"):
                 mobile = req["pending_mobile"] or ""
                 code = request.form.get("otp", "").strip()
-                conn = portal.get_db()
-                cur = conn.cursor()
-                cur.execute("SELECT code, created_at FROM otps WHERE mobile = %s ORDER BY id DESC LIMIT 1",
-                            (mobile,))
-                row = cur.fetchone()
-                cur.close(); conn.close()
-                if row and secrets.compare_digest(row[0], code) and \
-                        (datetime.now() - row[1]).total_seconds() <= portal.OTP_VALIDITY_SECONDS:
+                if verify_otp(portal.get_db, mobile, code, portal.OTP_VALIDITY_SECONDS):
                     _update_request(rid, subject="citizen:" + mobile)
                     return redirect(url_for("oauth.consent", rid=rid))
                 flash("Invalid or expired OTP.")
@@ -375,16 +380,11 @@ def login():
                 if len(mobile) != 10 or not mobile.isdigit():
                     flash("Please enter a valid 10-digit mobile number.")
                 else:
-                    code = "%06d" % secrets.randbelow(1000000)
-                    conn = portal.get_db()
-                    cur = conn.cursor()
-                    cur.execute("INSERT INTO otps (mobile, code, created_at) VALUES (%s, %s, %s)",
-                                (mobile, code, datetime.now()))
-                    conn.commit()
-                    cur.close(); conn.close()
-                    portal.send_sms(mobile, "Your Sewa Setu OTP is %s. Valid for 5 minutes." % code)
-                    _update_request(rid, pending_mobile=mobile)
-                    req["pending_mobile"] = mobile
+                    if issue_otp(portal.get_db, mobile, portal.send_sms):
+                        _update_request(rid, pending_mobile=mobile)
+                        req["pending_mobile"] = mobile
+                    else:
+                        flash("Please wait before requesting another OTP.")
         else:
             if (portal.ADMIN_PASSWORD and request.form.get("username") == portal.ADMIN_USERNAME and
                     request.form.get("password") == portal.ADMIN_PASSWORD):

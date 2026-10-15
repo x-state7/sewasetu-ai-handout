@@ -1,12 +1,21 @@
 {% extends "base.html" %}
 {% block content %}
 <h2>Application Status Portal</h2>
-<form method="post">
-  <label>Mobile Number</label>
-  <input type="text" name="mobile" maxlength="10">
-  <label>Password</label>
-  <input type="password" name="password">
-  <p><button class="btn" type="submit">Login</button></p>
-</form>
-<p class="note"><a href="/status/reset">Forgot password?</a></p>
+{% if pending_mobile %}
+  <p class="note">A verification code was sent to {{ pending_mobile }}.</p>
+  <form method="post">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <label>Six-digit OTP</label>
+    <input type="text" name="otp" maxlength="6" inputmode="numeric" autocomplete="one-time-code" required>
+    <p><button class="btn" type="submit">Verify and sign in</button></p>
+  </form>
+  <p><a href="/status?restart=1">Request another OTP</a> (subject to a short cooldown)</p>
+{% else %}
+  <form method="post">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <label>Mobile Number</label>
+    <input type="text" name="mobile" maxlength="10" inputmode="numeric" required>
+    <p><button class="btn" type="submit">Send OTP</button></p>
+  </form>
+{% endif %}
 {% endblock %}

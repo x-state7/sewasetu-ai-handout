@@ -124,3 +124,34 @@ WHERE status IN (
 CREATE UNIQUE INDEX IF NOT EXISTS uq_app_application_no
 ON applications (application_no)
 WHERE application_no IS NOT NULL;
+
+);
+
+-- Backstop for all writers (Flask, future MCP, maintenance scripts), not only
+-- callers of the transaction-safe application service.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_app_active_mobile
+  ON applications (mobile)
+  WHERE status IN ('PENDING', 'APPROVED', 'DEEMED_APPROVED');
+
+-- Seeded reference numbers are unique; new references are based on row IDs.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_app_application_no
+  ON applications (application_no)
+  WHERE application_no IS NOT NULL;
+
+-- Step 3: shared OTP send and verification budgets across app/OAuth workers.
+CREATE TABLE IF NOT EXISTS otp_send_attempts (
+    id BIGSERIAL PRIMARY KEY,
+    mobile VARCHAR(15) NOT NULL,
+    attempted_at TIMESTAMP NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_otp_send_attempts_mobile_time
+    ON otp_send_attempts(mobile, attempted_at);
+CREATE TABLE IF NOT EXISTS otp_verify_attempts (
+    id BIGSERIAL PRIMARY KEY,
+    mobile VARCHAR(15) NOT NULL,
+    attempted_at TIMESTAMP NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_otp_verify_attempts_mobile_time
+    ON otp_verify_attempts(mobile, attempted_at);
+CREATE INDEX IF NOT EXISTS idx_otps_mobile_created_at
+    ON otps(mobile, created_at);

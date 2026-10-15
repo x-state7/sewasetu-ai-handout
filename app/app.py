@@ -11,6 +11,7 @@ import os
 import io
 import re
 import random
+import secrets
 import hashlib
 import configparser
 from datetime import datetime, date, timedelta
@@ -29,13 +30,37 @@ from flask import (Flask, request, session, redirect, url_for, render_template,
                    flash, send_file, abort)
 from fpdf import FPDF
 from application_services import submit_applications as _submit_application
+
+#i am adding these imports below because our application will now use the new security 
+# functions rather than duplicating security checks in individual routes.
+
+from security_config import (
+    require_flask_secret,
+    configure_session_security,
+)
+from security_forms import init_csrf
+from security_uploads import save_document, InvalidDocument
+from security_otp import issue_otp, verify_otp
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 config = configparser.ConfigParser()
 config.read(os.path.join(BASE_DIR, "config", "app.ini"))
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY") or config.get("app", "secret_key")
+
+#This removes the insecure fallback secret, sets secure
+#cookie properties and enables browser CSRF validation.
+app.secret_key = require_flask_secret()
+
+configure_session_security(
+    app,
+    os.environ.get(
+        "PUBLIC_BASE_URL",
+        "http://localhost:8000"
+    )
+)
+init_csrf(app)
 # Two hours: elderly applicants fill the form slowly; the draft lives in the session.
 app.config["PERMANENT_SESSION_LIFETIME"] = 7200
 
@@ -74,7 +99,7 @@ def get_db():
         port=config.get("database", "port"),
         dbname=config.get("database", "name"),
         user=config.get("database", "user"),
-        password=config.get("database", "password"),
+        password=os.environ["DB_PASSWORD"],
     )
 
 
@@ -214,8 +239,9 @@ def create_application(cur, mobile, cleaned):
         (app_no, new_id)
     )
     
-    # status portal account; password is DOB as DDMMYYYY per dept. circular
-    portal_pass = cleaned["dob"].strftime("%d%m%Y")
+    # Status login now uses OTP authentication.
+    # Keep a legacy portal_users record for compatibility.
+    portal_pass = secrets.token_urlsafe(32)
     cur.execute("SELECT count(*) FROM portal_users WHERE mobile = %s", (mobile,))
     if cur.fetchone()[0] == 0:
         
@@ -265,6 +291,11 @@ def gateway_proxy(subpath):
     # Convenience proxy to the internal SMS gateway, so the OTP inbox is reachable
     # on the main site without opening a second port on the host. The gateway
     # itself runs only on the internal network.
+
+    # The gateway contains OTP messages.
+    # Restrict the inbox to authenticated officers.
+    if not session.get("admin"):
+        abort(403)
     try:
         r = requests.get(SMS_GATEWAY_URL + "/" + subpath,
                          params=request.args, timeout=5)
@@ -296,14 +327,12 @@ def apply():
         if len(mobile) != 10 or not mobile.isdigit():
             flash("Please enter a valid 10-digit mobile number.")
             return render_template("apply.html", captcha_q=make_captcha())
-        code = str(random.randint(100000, 999999))
-        conn = get_db()
-        cur = conn.cursor()
-        cur.execute("INSERT INTO otps (mobile, code, created_at) VALUES (%s, %s, %s)",
-                    (mobile, code, datetime.now()))
-        conn.commit()
-        cur.close(); conn.close()
-        send_sms(mobile, "Your Sewa Setu OTP is %s. Valid for 5 minutes." % code)
+
+        # Generate and send a secure, rate-limited OTP
+        if not issue_otp(get_db, mobile, send_sms):
+            flash("Please wait before requesting another OTP.")
+            return redirect(url_for("apply"))
+
         session.permanent = True
         session["apply_mobile"] = mobile
         return redirect(url_for("verify"))
@@ -323,20 +352,12 @@ def verify():
         return redirect(url_for("apply"))
     if request.method == "POST":
         code = request.form.get("otp", "").strip()
-        conn = get_db()
-        cur = conn.cursor()
-        cur.execute("SELECT code, created_at FROM otps WHERE mobile = %s "
-                    "ORDER BY id DESC LIMIT 1", (mobile,))
-        row = cur.fetchone()
-        cur.close(); conn.close()
-        if row and row[0] == code:
-            age = (datetime.now() - row[1]).total_seconds()
-            if age > OTP_VALIDITY_SECONDS:
-                app.logger.warning("otp expired mobile=%s age=%ds" % (mobile, int(age)))
-                flash("OTP expired. Please request a new OTP.")
-                return redirect(url_for("apply"))
+
+        if verify_otp(get_db, mobile, code, OTP_VALIDITY_SECONDS):
             session["verified_mobile"] = mobile
+            session.pop("apply_mobile", None)
             return redirect(url_for("form_step", step=1))
+
         flash("Invalid OTP.")
     return render_template("verify.html", mobile=mobile)
 
@@ -370,18 +391,20 @@ def upload():
         if f is None or f.filename == "":
             flash("Please choose a file to upload (JPG, PNG or PDF, up to 5 MB).")
             return render_template("upload.html")
-        filename = f.filename.lower()
-        content = f.read()
-        if not filename.rsplit(".", 1)[-1] in ("pdf", "jpg", "jpeg", "png"):
-            flash("Please upload a JPG, PNG or PDF file.")
+            
+        content = f.read(5 * 1024 * 1024 + 1)
+        #  Validate document and store securely
+        try:
+            path = save_document(
+                UPLOAD_DIR,
+                f.filename,
+                content
+            )
+
+        except InvalidDocument as exc:
+            flash(str(exc))
             return render_template("upload.html")
-        if len(content) > 5 * 1024 * 1024:
-            flash("File is larger than 5 MB. Please upload a smaller file.")
-            return render_template("upload.html")
-        os.makedirs(UPLOAD_DIR, exist_ok=True)
-        path = os.path.join(UPLOAD_DIR, "%s_%s" % (session["verified_mobile"], filename))
-        with open(path, "wb") as out:
-            out.write(content)
+
         session["doc_path"] = path
         return redirect(url_for("declaration"))
     return render_template("upload.html")
@@ -440,8 +463,11 @@ def handle_submission():
     # see their application and download the acknowledgment without a second login.
     session["logged_in"] = True
     session["portal_mobile"] = mobile
-    send_sms(mobile, "Sewa Setu: application %s received. Track at the status portal "
-                     "with mobile no. and password (DOB as DDMMYYYY)." % app_no)
+    send_sms( 
+        mobile,
+        "Sewa Setu: application %s received. Track its status "
+        "by signing in with your mobile number and OTP." % app_no
+    )
     return render_template("confirmation.html", app_no=app_no, app_id=new_id)
 
 
@@ -480,34 +506,90 @@ def generate_acknowledgment(cur, app_id):
 # ---------------------------------------------------------------------------
 # Status portal (citizen login)
 # ---------------------------------------------------------------------------
-
+#First POST: citizen enters their mobile number and requests an OTP.
+#Second POST: citizen submits the OTP.
+#Successful verification creates an authenticated citizen session.
+#The database lookup uses the verified mobile number, not an arbitrary user-supplied account ID.
+#- Expired, invalid or consumed OTPs cannot authenticate.
 @app.route("/status", methods=["GET", "POST"])
 def status_login():
-    if request.method == "POST":
-        mobile = request.form.get("mobile", "").strip()
-        password = request.form.get("password", "")
-        conn = get_db()
-        cur = conn.cursor()
-        cur.execute("SELECT password_hash FROM portal_users WHERE mobile = %s", (mobile,))
-        row = cur.fetchone()
-        cur.close(); conn.close()
-        if row and row[0] == hash_password(password):
-            session["logged_in"] = True
-            session["portal_mobile"] = mobile
-            conn = get_db()
-            cur = conn.cursor()
-            cur.execute("SELECT id FROM applications WHERE mobile = %s "
-                        "ORDER BY submitted_at DESC LIMIT 1", (mobile,))
-            r = cur.fetchone()
-            cur.close(); conn.close()
-            if r:
-                return redirect(url_for("view_application", app_id=r[0]))
-            flash("No application found for this mobile number.")
-            return redirect(url_for("status_login"))
-        flash("Mobile number or password is incorrect. The password is your date of "
-              "birth as DDMMYYYY.")
-    return render_template("status_login.html")
+    """OTP-based citizen status portal login."""
 
+    if request.method == "GET" and request.args.get("restart") == "1":
+        session.pop("status_pending_mobile", None)
+
+    pending = session.get("status_pending_mobile")
+
+    if request.method == "POST":
+
+        # Stage 2: Verify the received OTP
+        if pending and request.form.get("otp") is not None:
+
+            code = request.form.get("otp", "").strip()
+
+            if verify_otp(
+                get_db,
+                pending,
+                code,
+                OTP_VALIDITY_SECONDS
+            ):
+                session.clear()
+                session.permanent = True
+
+                session["logged_in"] = True
+                session["portal_mobile"] = pending
+
+                conn = get_db()
+                cur = conn.cursor()
+
+                cur.execute(
+                    "SELECT id FROM applications WHERE mobile = %s "
+                    "ORDER BY submitted_at DESC LIMIT 1",
+                    (pending,)
+                )
+
+                found = cur.fetchone()
+
+                cur.close()
+                conn.close()
+
+                if found:
+                    return redirect(
+                        url_for(
+                            "view_application",
+                            app_id=found[0]
+                        )
+                    )
+
+                flash("No application found for this mobile number.")
+                return redirect(url_for("status_login"))
+
+            flash("Invalid or expired OTP. Please try again.")
+
+        # Stage 1: Request an OTP
+        else:
+            mobile = request.form.get("mobile", "").strip()
+
+            if (
+                len(mobile) != 10
+                or not mobile.isascii()
+                or not mobile.isdigit()
+            ):
+                flash("Please enter a valid 10-digit mobile number.")
+
+            elif issue_otp(get_db, mobile, send_sms):
+                session["status_pending_mobile"] = mobile
+                pending = mobile
+
+                flash("OTP sent. Please enter the code you received.")
+
+            else:
+                flash("Please wait before requesting another OTP.")
+
+    return render_template(
+        "status_login.html",
+        pending_mobile=pending
+    )
 
 @app.route("/application/<int:app_id>")
 def view_application(app_id):
@@ -577,26 +659,12 @@ def ack_pdf(app_id):
 
 @app.route("/status/reset", methods=["GET", "POST"])
 def reset_password():
-    if request.method == "POST":
-        mobile = request.form.get("mobile", "")
-        conn = get_db()
-        cur = conn.cursor()
-        # fetch account for reset
-        cur.execute("SELECT mobile FROM portal_users WHERE mobile = %s", (mobile,))
-        row = cur.fetchone()
-        if row:
-            cur.execute("SELECT dob FROM applications WHERE mobile = %s LIMIT 1", (mobile,))
-            r2 = cur.fetchone()
-            if r2:
-                newpass = r2[0].strftime("%d%m%Y")
-                cur.execute("UPDATE portal_users SET password_hash = %s WHERE mobile = %s",
-                            (hash_password(newpass), row[0]))
-                conn.commit()
-                send_sms(row[0], "Sewa Setu: your password has been reset to your "
-                                 "date of birth (DDMMYYYY).")
-        cur.close(); conn.close()
-        flash("If the mobile number exists, the password has been reset and sent by SMS.")
-    return render_template("reset.html")
+    flash(
+        "Password reset is no longer required. "
+        "Sign in using a one-time SMS code."
+    )
+
+    return redirect(url_for("status_login"))
 
 
 # ---------------------------------------------------------------------------
@@ -608,6 +676,11 @@ def admin_login():
     if request.method == "POST":
         if (ADMIN_PASSWORD and request.form.get("username") == ADMIN_USERNAME and
                 request.form.get("password") == ADMIN_PASSWORD):
+            #Clear any previous session data
+            session.clear()
+            #Enable session expiration settings
+            session.permanent = True
+            
             session["logged_in"] = True
             session["admin"] = True
             session["admin_user"] = ADMIN_USERNAME

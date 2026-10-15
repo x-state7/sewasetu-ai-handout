@@ -34,7 +34,7 @@ def main():
         port=config.get("database", "port"),
         dbname=config.get("database", "name"),
         user=config.get("database", "user"),
-        password=config.get("database", "password"),
+        password=os.environ["DB_PASSWORD"],
     )
     cur = conn.cursor()
     cutoff = datetime.now() - timedelta(days=SLA_DAYS)
@@ -52,7 +52,11 @@ def main():
         cur.execute("INSERT INTO audit_log (application_id, action, actor, note, at) "
                     "VALUES (%s, 'DEEMED_APPROVED', 'system:rtps-cron', "
                     "'not processed within SLA', %s)", (app_id, datetime.now()))
-    conn.commit()
+    # Expired OTP data should not accumulate or remain readable indefinitely.
+    cur.execute("DELETE FROM otps WHERE created_at < %s", (datetime.now() - timedelta(hours=1),))
+    cur.execute("DELETE FROM otp_send_attempts WHERE attempted_at < %s", (datetime.now() - timedelta(hours=2),))
+    cur.execute("DELETE FROM otp_verify_attempts WHERE attempted_at < %s", (datetime.now() - timedelta(hours=1),))
+    conn.commit() 
     for app_no, mobile in rows:
         try:
             requests.post(SMS_GATEWAY_URL + "/api/send", json={
@@ -67,5 +71,3 @@ def main():
     conn.close()
 
 
-if __name__ == "__main__":
-    sys.exit(main())

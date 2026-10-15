@@ -22,7 +22,8 @@
 submit a fresh application with the same mobile number.</p>
 <form method="post" action="/application/{{ app_id }}/withdraw"
       onsubmit="return confirm('Withdraw application {{ a[0] }}? This cannot be undone.');">
-  <button class="btn" style="background:#a33" type="submit">Withdraw this application</button>
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <button class="btn" style="background:#a33" type="submit">Withdraw this application</button>
 </form>
 {% elif a[8] in ('WITHDRAWN', 'REJECTED') %}
 <p class="note">This application is {{ a[8].lower() }}. You may

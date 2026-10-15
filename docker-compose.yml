@@ -17,9 +17,10 @@ services:
     environment:
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-change-me-before-deploying}
-      # the address at which people reach this portal; stamped into sign-in tokens and
-      # discovery documents, so it must be the public one when deployed
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in your .env}
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in your .env}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8000}
+      OAUTH_CIMD_ALLOWED_HOSTS: ${OAUTH_CIMD_ALLOWED_HOSTS:-}
     depends_on:
       - db
       - smsgw
@@ -34,6 +35,8 @@ services:
     command: ["sh", "-c", "until python /app/scripts/deemed_approval.py; do sleep 5; done; exec cron -f"]
     depends_on:
       - db
+    environment:
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in your .env}
     volumes:
       - applogs:/var/log/sewasetu
 
