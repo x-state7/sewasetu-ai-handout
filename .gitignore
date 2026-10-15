@@ -9,3 +9,20 @@ venv/
 .pytest_cache/
 uploads/
 *.log
+
+# valuation results
+eval-reports/
+app/eval-reports/
+
+# Deployment backups
+private-backups/
+*.dump
+*.partial
+
+# TLS key material
+*.key
+*.pem
+
+# Local deployment overrides
+docker-compose.override.yml
+deploy/.env

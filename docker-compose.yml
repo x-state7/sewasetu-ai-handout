@@ -9,11 +9,20 @@ services:
       - pgdata:/var/lib/postgresql/data
       - ./app/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
       - ./seed/seed.sql:/docker-entrypoint-initdb.d/02-seed.sql
-
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
   app:
     build: ./app
+    restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
+
     environment:
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in your .env}
@@ -22,14 +31,17 @@ services:
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?Set PUBLIC_BASE_URL in your .env}
       OAUTH_CIMD_ALLOWED_HOSTS: ${OAUTH_CIMD_ALLOWED_HOSTS:-}
     depends_on:
-      - db
-      - smsgw
+      db:
+        condition: service_healthy
+      smsgw:
+        condition: service_started
     volumes:
       - uploads:/var/sewasetu/uploads
       - applogs:/var/log/sewasetu
       
   mcp-citizen:
     build: ./app
+    restart: unless-stopped
     command:
       - uvicorn
       - mcp_citizen:app
@@ -43,12 +55,15 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD}
       SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY}
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     expose:
       - "8011"
 
   mcp-officer:
     build: ./app
+    restart: unless-stopped
+
     command:
       - uvicorn
       - mcp_officer:app
@@ -62,16 +77,20 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD}
       SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY}
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     expose:
       - "8012"
   scheduler:
     build: ./app
+    restart: unless-stopped
+
     # Run the deemed-approval job once at startup (so a freshly restored
     # database is brought up to date), then hand over to cron for the nightly run.
     command: ["sh", "-c", "until python /app/scripts/deemed_approval.py; do sleep 5; done; exec cron -f"]
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     environment:
       DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in your .env}
     volumes:
@@ -120,7 +139,23 @@ services:
       EVAL_REPORT_DIR: /var/sewasetu/eval-reports
     volumes:
       - evalreports:/var/sewasetu/eval-reports
-
+  proxy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      PUBLIC_HOSTNAME: ${PUBLIC_HOSTNAME:?Set PUBLIC_HOSTNAME}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+      - mcp-citizen
+      - mcp-officer
+      
 volumes:
   pgdata:
   uploads:
