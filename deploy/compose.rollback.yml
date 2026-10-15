@@ -1,0 +1,5 @@
+
+services:
+  app:
+    image: "sevasetu-app:${APP_IMAGE_TAG:?Set APP_IMAGE_TAG}"
+    build: !reset null
