@@ -109,3 +109,18 @@ CREATE TABLE IF NOT EXISTS oauth_program_tokens (     -- admin-issued, long-live
     expires_at TIMESTAMP,
     revoked_at TIMESTAMP
 );
+-- Prevent multiple active applications for one mobile.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_app_active_mobile
+ON applications (mobile)
+WHERE status IN (
+    'PENDING',
+    'APPROVED',
+    'DEEMED_APPROVED'
+);
+-- Even if two simultaneous requests bypass the Python duplicate check, PostgreSQL enforces the uniqueness rule. 
+--The second index protects application reference numbers.
+
+-- Ensure public application references are unique.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_app_application_no
+ON applications (application_no)
+WHERE application_no IS NOT NULL;

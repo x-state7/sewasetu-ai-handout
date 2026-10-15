@@ -28,7 +28,7 @@ import psycopg2
 from flask import (Flask, request, session, redirect, url_for, render_template,
                    flash, send_file, abort)
 from fpdf import FPDF
-
+from application_services import submit_applications as _submit_application
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 config = configparser.ConfigParser()
@@ -104,9 +104,9 @@ def deadline_remaining():
         return None
     return int(delta.total_seconds() // 3600)
 
-
-def new_application_no():
-    return "SSP" + datetime.now().strftime("%y") + str(random.randint(100000, 999999))
+#removed this function because randon 6 digit suffixes can collide
+# def new_application_no():
+#     return "SSP" + datetime.now().strftime("%y") + str(random.randint(100000, 999999))
 
 
 def write_audit(cur, app_id, action, actor, note=""):
@@ -190,29 +190,60 @@ def create_application(cur, mobile, cleaned):
 
     The caller commits. Returns (id, application_no).
     """
-    app_no = new_application_no()
+    # app_no = new_application_no()
     cur.execute(
         """INSERT INTO applications
-           (application_no, applicant_name, mobile, dob, gender, marital_status,
+           (applicant_name, mobile, dob, gender, marital_status,
             husband_name, husband_employer, village, block, bank_account, ifsc,
             doc_path, status, submitted_at)
            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'PENDING',%s)
            RETURNING id""",
-        (app_no, cleaned["applicant_name"], mobile, cleaned["dob"], cleaned["gender"],
+        (cleaned["applicant_name"], mobile, cleaned["dob"], cleaned["gender"],
          cleaned["marital_status"], cleaned["husband_name"], cleaned["husband_employer"],
          cleaned["village"], cleaned["block"], cleaned["bank_account"], cleaned["ifsc"],
          cleaned["doc_path"], datetime.now()))
     new_id = cur.fetchone()[0]
-
+  
+    app_no = "SSP%s%08d" % (
+        now_ist().strftime("%y"),
+        new_id
+    )
+    
+    cur.execute(
+        "UPDATE applications SET application_no = %s WHERE id = %s",
+        (app_no, new_id)
+    )
+    
     # status portal account; password is DOB as DDMMYYYY per dept. circular
     portal_pass = cleaned["dob"].strftime("%d%m%Y")
     cur.execute("SELECT count(*) FROM portal_users WHERE mobile = %s", (mobile,))
     if cur.fetchone()[0] == 0:
-        cur.execute("INSERT INTO portal_users (mobile, password_hash) VALUES (%s,%s)",
-                    (mobile, hash_password(portal_pass)))
+        
+        cur.execute(
+            "INSERT INTO portal_users (mobile, password_hash) "
+            "VALUES (%s, %s) "
+            "ON CONFLICT (mobile) DO NOTHING",
+        (mobile, hash_password(portal_pass))
+        )
     write_audit(cur, new_id, "SUBMIT", "applicant:%s" % mobile)
     return new_id, app_no
+#Database-derived reference numbers avoid random collisions 
+# ON CONFLICT prevents duplicate status-portal account creation.
+#  The entire operation remains transactional.
 
+#Both future AI tools and the web portal will use identical validation and database
+#operations instead of maintaining duplicated business logic.
+def submit_application(mobile, data, doc_path):
+    """Shared entry point for web portal and MCP."""
+    return _submit_application(
+        mobile,
+        data,
+        doc_path,
+        connect=get_db,
+        validate=validate_application,
+        find_active=active_application,
+        insert=create_application,
+    )
 
 # ---------------------------------------------------------------------------
 # Public pages
@@ -373,24 +404,34 @@ def declaration():
 def handle_submission():
     mobile = session.get("verified_mobile")
     data = session.get("form_data", {})
-    errors, cleaned = validate_application(data, session.get("doc_path", ""))
-    if errors:
-        flash("Please correct the following before submitting: " + "; ".join(errors) + ".")
+
+    # STEP 2 Use the shared transaction-safe submission service
+    result = submit_application(
+        mobile,
+        data,
+        session.get("doc_path", "")
+    )
+
+    # STEP 2: Handle validation errors
+    if result.status == "invalid":
+        flash(
+            "Please correct the following before submitting: "
+            + "; ".join(result.errors) + "."
+        )
         return redirect(url_for("form_step", step=1))
 
-    conn = get_db()
-    cur = conn.cursor()
-    existing = active_application(cur, mobile)
-    if existing:
-        cur.close(); conn.close()
-        flash("Application %s (%s) already exists for this mobile number. A pending "
-              "application can be withdrawn from the status portal if you need to "
-              "apply afresh." % (existing[1], existing[2]))
+    # STEP 2 Handle existing applications
+    if result.status == "existing":
+        flash(
+            "Application %s (%s) already exists for this mobile number. "
+            "A pending application can be withdrawn from the status portal "
+            "if you need to apply afresh."
+            % (result.application_no, result.application_status)
+        )
         return redirect(url_for("index"))
 
-    new_id, app_no = create_application(cur, mobile, cleaned)
-    conn.commit()
-    cur.close(); conn.close()
+    # STEP 2: Retrieve successful submission details
+    new_id, app_no = result.application_id, result.application_no
 
     session.pop("form_data", None)
     session.pop("doc_path", None)
