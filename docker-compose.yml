@@ -59,7 +59,8 @@ services:
         condition: service_healthy
     expose:
       - "8011"
-
+    volumes:
+      - uploads:/var/sewasetu/uploads:ro
   mcp-officer:
     build: ./app
     restart: unless-stopped
@@ -74,6 +75,7 @@ services:
     environment:
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?Set PUBLIC_BASE_URL}
       MCP_JWKS_URL: ${MCP_JWKS_URL:?Set MCP_JWKS_URL}
+      OFFICER_ALLOWED_BLOCKS: ${OFFICER_ALLOWED_BLOCKS:?Set officer block names}
       DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD}
       SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY}
     depends_on:
@@ -120,6 +122,22 @@ services:
     expose:
       - "8030"
 
+  eval-public:
+    build: ./app
+    command:
+      - gunicorn
+      - --bind
+      - 0.0.0.0:8031
+      - --workers
+      - "1"
+      - eval_public:app
+    environment:
+      EVAL_REPORT_DIR: /var/sewasetu/eval-public
+    volumes:
+      - evalpublic:/var/sewasetu/eval-public:ro
+    expose:
+      - "8031"
+
   # Step 5 — Deployment-only MCP Evaluation Runner
   eval-runner:
     build: ./app
@@ -137,8 +155,13 @@ services:
       EVAL_CITIZEN_A_APPLICATION_NO: ${EVAL_CITIZEN_A_APPLICATION_NO:-}
       EVAL_CITIZEN_A_EXPECTED_STATUS: ${EVAL_CITIZEN_A_EXPECTED_STATUS:-}
       EVAL_REPORT_DIR: /var/sewasetu/eval-reports
+      EVAL_PUBLIC_REPORT_DIR: /var/sewasetu/eval-public
+      DB_HOST: db
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD}
     volumes:
       - evalreports:/var/sewasetu/eval-reports
+      - evalpublic:/var/sewasetu/eval-public
+
   proxy:
     image: caddy:2
     restart: unless-stopped
@@ -155,9 +178,13 @@ services:
       - app
       - mcp-citizen
       - mcp-officer
-      
+      - eval-public
+
 volumes:
   pgdata:
   uploads:
   applogs:
   evalreports:
+  evalpublic:
+  caddy_data:
+  caddy_config:
