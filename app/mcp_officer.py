@@ -1,32 +1,101 @@
 
-"""Officer MCP server: authenticated read-only operational summaries."""
-from mcp_runtime import create_mcp, require_identity
-from mcp_repository import officer_queue, officer_counts, officer_status
+#This creates five Officer tools, up from three.
+#The Citizen and Officer tools remain separate. The authenticated identity comes from the 
+#verified OAuth access token, not an AI-supplied mobile number or officer username.
+"""Department-officer MCP tools with block restrictions."""
+
+from contextlib import closing
+
 from app import get_db
 
-mcp = create_mcp('Seva Setu Officer', 'officer')
+from mcp_runtime import (
+    create_mcp,
+    require_identity,
+    streamable_app,
+)
+
+from mcp_actions import (
+    officer_queue,
+    officer_detail,
+    officer_decide,
+    _blocks,
+)
+
+
+mcp = create_mcp("Seva Setu Officer", "officer")
 
 
 @mcp.tool()
-def pending_application_queue(limit: int = 25) -> list[dict]:
-    """View a small pending-work queue without bank or identity details."""
-    require_identity('officer')
-    return officer_queue(get_db, limit)
+def pending_application_queue(
+    limit: int = 20,
+) -> list[dict]:
+    """List oldest pending applications in assigned blocks."""
+    require_identity("officer")
+    return officer_queue(limit)
 
 
 @mcp.tool()
-def application_status(application_no: str) -> dict:
-    """View operational status of one application."""
-    require_identity('officer')
-    if not isinstance(application_no, str) or not (1 <= len(application_no) <= 40):
-        raise ValueError('Invalid application number')
-    return officer_status(get_db, application_no)
+def application_status(
+    application_no: str,
+) -> dict:
+    """Review an assigned-block application and its audit history."""
+    require_identity("officer")
+    return officer_detail(application_no)
 
 
 @mcp.tool()
 def application_status_counts() -> dict:
-    """Return per-status application counts."""
-    require_identity('officer')
-    return officer_counts(get_db)
+    """Count application statuses in assigned blocks only."""
+    require_identity("officer")
 
-app = mcp.streamable_http_app()
+    with closing(get_db()) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT status, COUNT(*)
+                FROM applications
+                WHERE block = ANY(%s)
+                GROUP BY status
+                """,
+                (_blocks(),),
+            )
+            return dict(cur.fetchall())
+
+
+@mcp.tool()
+def approve_application(
+    application_no: str,
+    confirm_decision: bool = False,
+    note: str = "",
+) -> dict:
+    """Approve a reviewed pending case after officer confirmation."""
+    officer = require_identity("officer")
+
+    return officer_decide(
+        application_no,
+        "APPROVED",
+        officer,
+        note,
+        confirm_decision,
+    )
+
+
+@mcp.tool()
+def reject_application(
+    application_no: str,
+    reason: str,
+    confirm_decision: bool = False,
+) -> dict:
+    """Reject a pending case with a reason and officer confirmation."""
+    officer = require_identity("officer")
+
+    return officer_decide(
+        application_no,
+        "REJECTED",
+        officer,
+        reason,
+        confirm_decision,
+    )
+
+
+app = streamable_app(mcp)

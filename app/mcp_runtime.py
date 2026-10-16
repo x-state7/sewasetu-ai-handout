@@ -1,68 +1,166 @@
 
-"""OAuth adapter: independently validates every MCP request using Step 1 auth core."""
+"""OAuth-backed MCP resource servers using MCP SDK v2."""
+
+# this new version retains the original JWT verifier, 
+# adds the authenticated subject to the SDK token context, and 
+# configures the hostname security checks for your public deployment.
+
+#the MCP SDK's HTTP transport can reject requests from non-localhost hosts
+#by default. Explicitly configuring allowed_hosts is required for deployment 
+# behind your real domain
 import os
+from urllib.parse import urlsplit
+
 from pydantic import AnyHttpUrl
 from mcp.server import MCPServer
-from mcp.server.auth.provider import AccessToken, TokenVerifier
+
+from mcp.server.auth.provider import (
+    AccessToken,
+    TokenVerifier,
+)
 from mcp.server.auth.settings import AuthSettings
-from mcp.server.auth.middleware.auth_context import get_access_token
+from mcp.server.auth.middleware.auth_context import (
+    get_access_token,
+)
+from mcp.server.transport_security import (
+    TransportSecuritySettings,
+)
+
 from mcp_auth import verify_mcp_token
 
 
-def _required(name):
-    value = os.environ.get(name, '').strip()
+def required(name):
+    value = os.environ.get(name, "").strip()
+
     if not value:
-        raise RuntimeError(f'Missing environment variable: {name}')
+        raise RuntimeError(
+            "Missing environment variable: " + name
+        )
+
     return value
-
-
-def _program_is_active(jti, subject, resource):
-    """Fail closed. Implement database check before enabling program tokens."""
-    return False
 
 
 class PortalTokenVerifier(TokenVerifier):
-    def __init__(self, role, resource, issuer, jwks_url):
-        self.role, self.resource = role, resource
-        self.issuer, self.jwks_url = issuer, jwks_url
+    def __init__(
+        self,
+        role,
+        resource,
+        issuer,
+        jwks_url,
+    ):
+        self.role = role
+        self.resource = resource
+        self.issuer = issuer
+        self.jwks_url = jwks_url
 
-    async def verify_token(self, token):
+    async def verify_token(self, raw):
         identity = verify_mcp_token(
-            token, issuer=self.issuer, resource=self.resource,
-            expected_role=self.role, jwks_url=self.jwks_url,
-            program_is_active=_program_is_active)
+            raw,
+            issuer=self.issuer,
+            resource=self.resource,
+            expected_role=self.role,
+            jwks_url=self.jwks_url,
+            program_is_active=(
+                lambda jti, subject, audience: False
+            ),
+        )
+
         if identity is None:
             return None
+
         return AccessToken(
-            token=token, client_id=identity.client_id,
-            scopes=[self.role], resource=self.resource,
+            token=raw,
+            client_id=identity.client_id,
+            subject=identity.subject,
+            resource=self.resource,
+            scopes=[self.role],
             expires_at=identity.expires_at,
-            claims={'subject': identity.subject, 'role': identity.role,
-                    'mobile': identity.mobile,
-                    'officer_username': identity.officer_username})
+            claims={
+                "iss": self.issuer,
+                "subject": identity.subject,
+                "role": identity.role,
+                "mobile": identity.mobile,
+                "officer_username":
+                    identity.officer_username,
+            },
+        )
 
 
 def create_mcp(name, role):
-    issuer = _required('PUBLIC_BASE_URL').rstrip('/')
-    # Exact public URL is also used as OAuth JWT audience.
-    resource = issuer + '/mcp/' + role
-    verifier = PortalTokenVerifier(role, resource, issuer, _required('MCP_JWKS_URL'))
-    server = MCPServer(
+    issuer = required(
+        "PUBLIC_BASE_URL"
+    ).rstrip("/")
+
+    resource = issuer + "/mcp/" + role
+
+    return MCPServer(
         name,
-        token_verifier=verifier,
-        auth=AuthSettings(issuer_url=AnyHttpUrl(issuer),
-                          resource_server_url=AnyHttpUrl(resource),
-                          required_scopes=[role], validate_token_resource=True))
-    return server
+        token_verifier=PortalTokenVerifier(
+            role,
+            resource,
+            issuer,
+            required("MCP_JWKS_URL"),
+        ),
+        auth=AuthSettings(
+            issuer_url=AnyHttpUrl(issuer),
+            resource_server_url=AnyHttpUrl(resource),
+            required_scopes=[role],
+            validate_token_resource=True,
+        ),
+    )
 
 
 def require_identity(role):
-    access = get_access_token()
-    claims = getattr(access, 'claims', None) if access else None
-    if not isinstance(claims, dict) or claims.get('role') != role:
-        raise PermissionError('Authentication required')
-    subject = claims.get('subject')
-    value = claims.get('mobile' if role == 'citizen' else 'officer_username')
-    if not value or subject != f'{role}:{value}':
-        raise PermissionError('Invalid identity')
+    token = get_access_token()
+    claims = token.claims if token else None
+
+    if not isinstance(claims, dict):
+        raise PermissionError("Authentication required")
+
+    if claims.get("role") != role:
+        raise PermissionError(
+            "Not authenticated for this role"
+        )
+
+    key = (
+        "mobile"
+        if role == "citizen"
+        else "officer_username"
+    )
+
+    value = claims.get(key)
+
+    if (
+        not isinstance(value, str)
+        or token.subject != role + ":" + value
+    ):
+        raise PermissionError(
+            "Invalid authenticated identity"
+        )
+
     return value
+
+
+def streamable_app(mcp):
+    public = required(
+        "PUBLIC_BASE_URL"
+    ).rstrip("/")
+
+    hostname = urlsplit(public).hostname
+
+    if not hostname:
+        raise RuntimeError("Invalid public hostname")
+
+    security = TransportSecuritySettings(
+        allowed_hosts=[
+            hostname,
+            hostname + ":*",
+        ],
+        allowed_origins=[
+            public,
+        ],
+    )
+
+    return mcp.streamable_http_app(
+        transport_security=security
+    )
