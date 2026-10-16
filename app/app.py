@@ -29,7 +29,8 @@ import psycopg2
 from flask import (Flask, request, session, redirect, url_for, render_template,
                    flash, send_file, abort)
 from fpdf import FPDF
-from application_services import submit_applications as _submit_application
+from application_service import submit_application as _submit_application
+from mcp_document_claims import issue_ticket
 
 #i am adding these imports below because our application will now use the new security 
 # functions rather than duplicating security checks in individual routes.
@@ -423,6 +424,82 @@ def declaration():
     return render_template("declaration.html", data=data, errors=errors,
                            doc_name=os.path.basename(session.get("doc_path", "") or ""))
 
+
+@app.route(
+    "/mcp/age-proof",
+    methods=["GET", "POST"]
+)
+def mcp_age_proof():
+    """Standalone age-proof upload for OTP-verified citizens."""
+
+    if not session.get("verified_mobile"):
+        flash("Verify your mobile number first.")
+        return redirect(url_for("apply"))
+
+    if request.method == "POST":
+        item = request.files.get("document")
+
+        if not item or not item.filename:
+            flash("Choose a JPG, PNG or PDF document.")
+            return render_template("mcp_age_proof.html")
+
+        try:
+            session["doc_path"] = save_document(
+                UPLOAD_DIR,
+                item.filename,
+                item.read(5 * 1024 * 1024 + 1),
+            )
+        except InvalidDocument as exc:
+            flash(str(exc))
+            return render_template("mcp_age_proof.html")
+
+        return redirect(url_for("mcp_document_ticket"))
+
+    return render_template("mcp_age_proof.html")
+
+
+@app.route(
+    "/mcp/document-ticket",
+    methods=["GET", "POST"]
+)
+def mcp_document_ticket():
+    """Issue a one-time ticket for verified uploaded age proof."""
+
+    mobile = session.get("verified_mobile")
+    uploaded = session.get("doc_path")
+
+    if not mobile:
+        return redirect(url_for("apply"))
+
+    if not uploaded:
+        return redirect(url_for("mcp_age_proof"))
+
+    if request.method == "GET":
+        return render_template(
+            "mcp_document_ticket.html",
+            ticket=None,
+        )
+
+    try:
+        raw = issue_ticket(
+            get_db,
+            mobile,
+            uploaded,
+            UPLOAD_DIR,
+        )
+    except ValueError:
+        flash("Upload a valid age proof first.")
+        return redirect(url_for("mcp_age_proof"))
+
+    response = app.make_response(
+        render_template(
+            "mcp_document_ticket.html",
+            ticket=raw,
+        )
+    )
+
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 def handle_submission():
     mobile = session.get("verified_mobile")

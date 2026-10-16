@@ -31,6 +31,9 @@ def submit_application(
     validate: Callable,
     find_active: Callable,
     insert: Callable,
+    document_ticket: str | None = None,
+    resolve_document: Callable | None = None,
+    consume_document: Callable | None = None,
 ) -> SubmissionResult:
     """Validate and submit, or return the citizen's already-active application.
 
@@ -54,10 +57,28 @@ def submit_application(
                     "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
                     (mobile,),
                 )
+                if document_ticket is not None:
+                    if resolve_document is None or consume_document is None:
+                        raise ValueError(
+                            "Document callbacks must be provided together"
+                        )
+
+                    doc_path = resolve_document(
+                        cur, mobile, document_ticket
+                    )
+
+                    if not doc_path:
+                        return SubmissionResult(
+                            status="invalid",
+                            errors=(
+                                "Upload age proof via the verified portal "
+                                "and provide a valid ticket",
+                            ),
+                        )
 
                 errors, cleaned = validate(data, doc_path)
                 if errors:
-                    return SubmissionResult(status="invalid", errors=tuple(errors))
+                    return SubmissionResult(status="invalid", errors=tuple(errors),)
 
                 current = find_active(cur, mobile)
                 if current:
@@ -68,8 +89,14 @@ def submit_application(
                         application_no=app_no,
                         application_status=status,
                     )
-
+            #The document-ticket check, application insertion
+            #and ticket consumption now happen in the same PostgreSQL transaction
                 app_id, app_no = insert(cur, mobile, cleaned)
+
+                if document_ticket is not None:
+                    consume_document(
+                        cur, mobile, document_ticket, app_id
+                    )
                 return SubmissionResult(
                     status="submitted",
                     application_id=app_id,
