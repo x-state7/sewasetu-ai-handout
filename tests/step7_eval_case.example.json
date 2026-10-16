@@ -1,0 +1,18 @@
+
+[
+  {
+    "id": "C01",
+    "persona_public": "Fictional senior citizen, 68, Sonari",
+    "goal_public": "Submit one pension application and receive its reference",
+    "conversation_public": [
+      "Citizen: I want to apply for my pension.",
+      "Assistant: Asked for missing details, explained document upload, and requested confirmation."
+    ],
+    "application_no": "REPLACE_WITH_ACTUAL_TEST_REFERENCE",
+    "test_mobile": "REPLACE_WITH_ACTUAL_SYNTHETIC_MOBILE",
+    "expected_status": "PENDING",
+    "expected_audit_action": "SUBMIT",
+    "expected_active_count": 1,
+    "require_age_proof": true
+  }
+]
