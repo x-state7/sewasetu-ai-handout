@@ -35,5 +35,30 @@ under applicable law and will result in cancellation of pension.</p>
   <p><input type="checkbox" required> I agree to the above declaration.</p>
   <p><button class="btn" type="submit">Submit Application</button></p>
 </form>
+
+<hr>
+
+<h3>Apply using a Citizen MCP assistant</h3>
+
+<p>
+After verifying your mobile and uploading
+age proof, request a one-time document ticket.
+</p>
+
+<form
+  method="post"
+  action="{{ url_for('mcp_document_ticket') }}"
+>
+  <input
+    type="hidden"
+    name="_csrf_token"
+    value="{{ csrf_token() }}"
+  >
+
+  <button class="btn" type="submit">
+    Get document ticket
+  </button>
+</form>
+
 {% endif %}
 {% endblock %}

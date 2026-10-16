@@ -371,8 +371,23 @@ def login():
             if request.form.get("otp"):
                 mobile = req["pending_mobile"] or ""
                 code = request.form.get("otp", "").strip()
-                if verify_otp(portal.get_db, mobile, code, portal.OTP_VALIDITY_SECONDS):
-                    _update_request(rid, subject="citizen:" + mobile)
+                #This does not skip OTP verification. It reuses 
+                # the successful verification in the existing OAuth login.
+                if verify_otp(
+                    portal.get_db,
+                    mobile,
+                    code,
+                    portal.OTP_VALIDITY_SECONDS
+                ):
+                    session.permanent = True
+                    session["verified_mobile"] = mobile
+
+                    _update_request(
+                        rid,
+                        subject="citizen:" + mobile
+                    )
+
+                    return redirect(url_for("oauth.consent", rid=rid))
                     return redirect(url_for("oauth.consent", rid=rid))
                 flash("Invalid or expired OTP.")
             else:
