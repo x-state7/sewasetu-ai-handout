@@ -1,4 +1,15 @@
+## Real AI + MCP + PostgreSQL evaluation (new)
+
+The live AI assessment is implemented in `app/eval_agent.py` with six fictional
+personas/actions in `app/evaluation/cases.example.json` and a secure test workflow in
+**[`app/evaluation/README.md`](app/evaluation/README.md)**. Real OAuth tokens, a
+model with tool calling, a disposable demo database and a one-time age-proof ticket
+are required. **No evaluation results are pre-filled or claimed.** Only genuine
+post-execution results may appear at `/eval-dashboard`.
+
 # Sewa Setu — Old Age Pension Portal
+
+**AWS deployment:** Use [`DEPLOY-AWS-EC2.md`](DEPLOY-AWS-EC2.md). The commands below reflect the original handout and are **not** appropriate for public hosting without configuration. The AWS demo defaults to fictional seed records.
 
 Department of Social Welfare, Government of Purvanchal. Maintained in-house.
 
