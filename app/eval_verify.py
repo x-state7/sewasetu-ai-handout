@@ -185,6 +185,7 @@ def main():
 
     report = {
         "run_id": "eval-" + uuid.uuid4().hex,
+        "mode": "manual_db_only",
         "created_at": datetime.now(
             timezone.utc
         ).isoformat(),

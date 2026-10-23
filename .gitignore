@@ -26,3 +26,7 @@ private-backups/
 # Local deployment overrides
 docker-compose.override.yml
 deploy/.env
+# private synthetic test fixtures, AI provider keys and reports
+/private-eval/*
+!/private-eval/.gitkeep
+app/evaluation/cases.private.json

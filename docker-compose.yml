@@ -1,14 +1,15 @@
 services:
   db:
     image: postgres:15
+    restart: unless-stopped
     environment:
       POSTGRES_DB: sewasetu
       POSTGRES_USER: sewasetu
       POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in your .env}
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./app/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
-      - ./seed/seed.sql:/docker-entrypoint-initdb.d/02-seed.sql
+      - ./app/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ${SEVASETU_SEED_FILE:-./seed/demo-seed.sql}:/docker-entrypoint-initdb.d/02-seed.sql:ro
     healthcheck:
       test:
         - CMD-SHELL
@@ -100,12 +101,14 @@ services:
 
   smsgw:
     build: ./smsgw
+    restart: unless-stopped
     # internal only — reached by the app over the Docker network
     expose:
       - "8025"
 
   eval-dashboard:
     build: ./app
+    restart: unless-stopped
     command:
       - gunicorn
       - --bind
@@ -124,6 +127,7 @@ services:
 
   eval-public:
     build: ./app
+    restart: unless-stopped
     command:
       - gunicorn
       - --bind
@@ -138,7 +142,38 @@ services:
     expose:
       - "8031"
 
-  # Step 5 — Deployment-only MCP Evaluation Runner
+  # Authenticated real LLM + real MCP tool calls + PostgreSQL verification.
+  # Uses test-only private JSON mounted read-only, never baked into Docker image.
+  eval-agent:
+    build: ./app
+    profiles: [evaluation]
+    command: ["python", "eval_agent.py", "/run/sevasetu-eval/cases.private.json"]
+    environment:
+      EVAL_CITIZEN_URL: ${EVAL_CITIZEN_URL:-}
+      EVAL_OFFICER_URL: ${EVAL_OFFICER_URL:-}
+      EVAL_CITIZEN_A_TOKEN: ${EVAL_CITIZEN_A_TOKEN:-}
+      EVAL_CITIZEN_B_TOKEN: ${EVAL_CITIZEN_B_TOKEN:-}
+      EVAL_OFFICER_TOKEN: ${EVAL_OFFICER_TOKEN:-}
+      EVAL_LLM_BASE_URL: ${EVAL_LLM_BASE_URL:-}
+      EVAL_LLM_MODEL: ${EVAL_LLM_MODEL:-}
+      EVAL_LLM_API_KEY: ${EVAL_LLM_API_KEY:-}
+      EVAL_ALLOW_INTERNAL_LLM_HTTP: ${EVAL_ALLOW_INTERNAL_LLM_HTTP:-}
+      EVAL_ENABLE_WRITES: ${EVAL_ENABLE_WRITES:-}
+      EVAL_PUBLIC_REPORT_DIR: /var/sewasetu/eval-public
+      DB_HOST: db
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD}
+    depends_on:
+      db:
+        condition: service_healthy
+      mcp-citizen:
+        condition: service_started
+      mcp-officer:
+        condition: service_started
+    volumes:
+      - evalpublic:/var/sewasetu/eval-public
+      - ./private-eval:/run/sevasetu-eval:ro
+
+  # Step 5 — Read-only direct MCP smoke evaluation (not an agent conversation).
   eval-runner:
     build: ./app
     profiles:
@@ -149,9 +184,9 @@ services:
     environment:
       EVAL_CITIZEN_URL: ${EVAL_CITIZEN_URL:?Set Citizen MCP URL}
       EVAL_OFFICER_URL: ${EVAL_OFFICER_URL:?Set Officer MCP URL}
-      EVAL_CITIZEN_A_TOKEN: ${EVAL_CITIZEN_A_TOKEN:?Set Citizen A token}
-      EVAL_CITIZEN_B_TOKEN: ${EVAL_CITIZEN_B_TOKEN:?Set Citizen B token}
-      EVAL_OFFICER_TOKEN: ${EVAL_OFFICER_TOKEN:?Set Officer token}
+      EVAL_CITIZEN_A_TOKEN: ${EVAL_CITIZEN_A_TOKEN:-}
+      EVAL_CITIZEN_B_TOKEN: ${EVAL_CITIZEN_B_TOKEN:-}
+      EVAL_OFFICER_TOKEN: ${EVAL_OFFICER_TOKEN:-}
       EVAL_CITIZEN_A_APPLICATION_NO: ${EVAL_CITIZEN_A_APPLICATION_NO:-}
       EVAL_CITIZEN_A_EXPECTED_STATUS: ${EVAL_CITIZEN_A_EXPECTED_STATUS:-}
       EVAL_REPORT_DIR: /var/sewasetu/eval-reports

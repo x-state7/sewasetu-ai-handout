@@ -64,6 +64,7 @@ Run: {{ report.run_id }} |
 </p>
 
 <p>
+Verified live agent + MCP + PostgreSQL run: {{ report.model }}.
 Passed {{ report.summary.passed }}
 of {{ report.summary.total }};
 pass rate {{ report.summary.pass_rate }}%
@@ -134,7 +135,8 @@ def latest():
             )
 
             if (
-                isinstance(report.get("results"), list)
+                report.get("mode") == "live_agent_db_verified"
+                and isinstance(report.get("results"), list)
                 and isinstance(report.get("summary"), dict)
             ):
                 return report
