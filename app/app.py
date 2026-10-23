@@ -475,10 +475,12 @@ def mcp_document_ticket():
         return redirect(url_for("mcp_age_proof"))
 
     if request.method == "GET":
-        return render_template(
+        response = app.make_response(render_template(
             "mcp_document_ticket.html",
             ticket=None,
-        )
+        ))
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
     try:
         raw = issue_ticket(

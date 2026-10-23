@@ -193,6 +193,7 @@ def officer_queue(limit=20):
             return [
                 {
                     "application_no": reference,
+                    "status": "PENDING",
                     "applicant_name": name,
                     "block": block,
                     "submitted_at": (

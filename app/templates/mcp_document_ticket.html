@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Age-proof ticket for AI-assisted submission</h2>
+<p>For a mobile-verified citizen only. Your age-proof upload is on file.
+Create a single-use ticket to let your own authorized assistant reference it.</p>
+{% if ticket %}
+  <p><strong>Copy this ticket now.</strong> It expires after 30 minutes and is consumed
+  after one successful application. Do not share it publicly.</p>
+  <p><code style="overflow-wrap:anywhere;user-select:all">{{ ticket }}</code></p>
+  <p>This ticket will not be shown again. It is not an application number.</p>
+  <p>Give the ticket only to the assistant that is signed in to your own citizen account.</p>
+{% else %}
+  <form method="post">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <button class="btn" type="submit">Issue a one-time document ticket</button>
+  </form>
+{% endif %}
+{% endblock %}

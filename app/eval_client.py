@@ -40,10 +40,10 @@ def validate_url(url):
 
 def normalize_result(result):
     """Convert MCP tool output to ordinary Python data."""
-    if result.isError:
+    if result.is_error:
         raise EvaluationClientError("MCP tool reported an error")
 
-    structured = getattr(result, "structuredContent", None)
+    structured = getattr(result, "structured_content", None)
     if structured is not None:
         return structured
 
