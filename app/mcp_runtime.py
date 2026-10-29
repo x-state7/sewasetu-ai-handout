@@ -40,6 +40,23 @@ def required(name):
     return value
 
 
+def _program_is_active(jti: str, subject: str, audience: str) -> bool:
+    """Check live officer program token status in PostgreSQL (fail closed)."""
+    from contextlib import closing
+    from app import get_db
+
+    with closing(get_db()) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT 1 FROM oauth_program_tokens
+                   WHERE jti = %s AND subject = %s AND audience = %s
+                     AND revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP
+                   LIMIT 1""",
+                (jti, subject, audience),
+            )
+            return cur.fetchone() is not None
+
+
 class PortalTokenVerifier(TokenVerifier):
     def __init__(
         self,
@@ -60,9 +77,7 @@ class PortalTokenVerifier(TokenVerifier):
             resource=self.resource,
             expected_role=self.role,
             jwks_url=self.jwks_url,
-            program_is_active=(
-                lambda jti, subject, audience: False
-            ),
+            program_is_active=_program_is_active,
         )
 
         if identity is None:
