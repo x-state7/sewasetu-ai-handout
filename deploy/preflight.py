@@ -39,7 +39,9 @@ def main():
     base = required("PUBLIC_BASE_URL")
     hostname = required("PUBLIC_HOSTNAME")
     secret = required("SECRET_KEY")
-    required("DB_PASSWORD")
+    db_password = required("DB_PASSWORD")
+    if db_password and "REPLACE_" in db_password.upper():
+        ERRORS.append("DB_PASSWORD is still a placeholder")
     required("ADMIN_USERNAME")
     admin_password = required("ADMIN_PASSWORD")
     jwks = required("MCP_JWKS_URL")
@@ -61,16 +63,17 @@ def main():
         except ValueError:
             ERRORS.append("Invalid public hostname")
 
-    if secret and len(secret.encode("utf-8")) < 32:
-        ERRORS.append("SECRET_KEY must be at least 32 bytes")
+    if secret and (len(secret.encode("utf-8")) < 32 or "REPLACE_" in secret.upper()):
+        ERRORS.append("SECRET_KEY must be a randomly generated value of at least 32 bytes")
 
     if admin_password and (
-        len(admin_password) < 16
+        "REPLACE_" in admin_password.upper()
+        or len(admin_password) < 16
         or admin_password == "change-me-before-deploying"
     ):
         ERRORS.append("Use a strong non-default admin password")
 
-    if dashboard_password and len(dashboard_password) < 24:
+    if dashboard_password and (len(dashboard_password) < 24 or "REPLACE_" in dashboard_password.upper()):
         ERRORS.append("Evaluation dashboard password is too short")
 
     required_files = [
@@ -83,6 +86,8 @@ def main():
         "app/eval_dashboard.py",
         "app/migrations/001_submission_constraints.sql",
         "app/migrations/002_otp_security.sql",
+        "app/migrations/003_mcp_document_claims.sql",
+        "seed/demo-seed.sql",
         "deploy/Caddyfile",
     ]
 

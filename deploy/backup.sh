@@ -24,9 +24,8 @@ trap 'rm -f "$TEMP"' ERR INT TERM
 echo "Creating PostgreSQL backup..."
 
 docker compose exec -T \
-  -e PGPASSWORD \
   db sh -c \
-  'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc --no-owner --no-acl' \
+  'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc --no-owner --no-acl' \
   > "$TEMP"
 
 if [[ ! -s "$TEMP" ]]; then

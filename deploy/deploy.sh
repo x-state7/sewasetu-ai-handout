@@ -25,7 +25,7 @@ echo "Static checks completed."
 echo
 echo "Required before production cutover:"
 echo "1. Verify a successful PostgreSQL backup and restore rehearsal"
-echo "2. Apply migrations 001 and 002 in sequence"
+echo "2. For existing databases, apply missing migrations 001, 002 and 003 in sequence"
 echo "3. Confirm Step 4 MCP SDK compatibility"
 echo "4. Confirm OAuth JWKS and resource discovery"
 echo "5. Start private services and inspect logs"
