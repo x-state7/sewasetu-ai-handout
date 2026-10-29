@@ -1,6 +1,7 @@
 -- Sewa Setu Old Age Pension Portal - schema
--- NOTE: seed.sql (shipped separately) loads after this and contains the
--- production data. Do not re-run against a live database.
+-- Fresh installations use synthetic seed/demo-seed.sql by default.
+-- Original seed/seed.sql is an archival export and must not be used without permission.
+-- Schema initialization only runs on a new PostgreSQL Docker volume.
 
 CREATE TABLE IF NOT EXISTS applications (
     id              SERIAL PRIMARY KEY,
@@ -124,8 +125,6 @@ WHERE status IN (
 CREATE UNIQUE INDEX IF NOT EXISTS uq_app_application_no
 ON applications (application_no)
 WHERE application_no IS NOT NULL;
-
-);
 
 
 -- Step 3: shared OTP send and verification budgets across app/OAuth workers.
