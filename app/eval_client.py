@@ -45,6 +45,18 @@ def normalize_result(result):
 
     structured = getattr(result, "structured_content", None)
     if structured is not None:
+        # MCP typed-list results may be wrapped as:
+        # {"result": [{...}, {...}]}
+        #
+        # Unwrap only the recognized list envelope.
+        # Preserve all ordinary dictionary results.
+        if (
+            isinstance(structured, dict)
+            and set(structured) == {"result"}
+            and isinstance(structured["result"], list)
+        ):
+            return structured["result"]
+
         return structured
 
     values = []
