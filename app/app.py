@@ -42,6 +42,8 @@ from security_config import (
 from security_forms import init_csrf
 from security_uploads import save_document, InvalidDocument
 from security_otp import issue_otp, verify_otp
+from reviewer_access import (allowed_test_mobiles, check_otp_reviewer,
+                             delivered_otp, otp_reviewer_enabled)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -304,6 +306,71 @@ def gateway_proxy(subpath):
                 {"Content-Type": r.headers.get("Content-Type", "text/html")})
     except Exception as e:
         return ("SMS gateway unreachable: %s" % e, 502)
+
+
+# ---------------------------------------------------------------------------
+# Restricted reviewer-only synthetic OTP helper (NOT an admin account).
+# ---------------------------------------------------------------------------
+
+@app.after_request
+def reviewer_no_store(response):
+    if request.path.startswith("/reviewer/otp"):
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["X-Frame-Options"] = "DENY"
+    return response
+
+
+@app.route("/reviewer/otp/login", methods=["GET", "POST"])
+def reviewer_otp_login():
+    if not otp_reviewer_enabled():
+        abort(404)
+    if request.method == "POST":
+        username = request.form.get("username", "")
+        password = request.form.get("password", "")
+        if check_otp_reviewer(username, password):
+            session.clear()                  # never inherit any admin session
+            session.permanent = True
+            session["reviewer_otp"] = True
+            return redirect(url_for("reviewer_otp"))
+        flash("Invalid reviewer credentials.")
+    return render_template("reviewer_otp_login.html")
+
+
+@app.route("/reviewer/otp/logout", methods=["POST"])
+def reviewer_otp_logout():
+    session.clear()
+    return redirect(url_for("index"))
+
+
+@app.route("/reviewer/otp", methods=["GET", "POST"])
+def reviewer_otp():
+    if not otp_reviewer_enabled():
+        abort(404)
+    if session.get("reviewer_otp") is not True:
+        return redirect(url_for("reviewer_otp_login"))
+    allowed = allowed_test_mobiles()
+    if request.method == "POST":
+        mobile = request.form.get("mobile", "").strip()
+        if mobile not in allowed:
+            abort(403)
+        session["reviewer_otp_mobile"] = mobile
+        return redirect(url_for("reviewer_otp"))
+    selected = session.get("reviewer_otp_mobile")
+    code = None
+    gateway_error = False
+    if selected in allowed:
+        try:
+            response = requests.get(SMS_GATEWAY_URL + "/api/messages",
+                                    params={"to": selected}, timeout=5)
+            response.raise_for_status()
+            code = delivered_otp(response.json(), selected)
+        except (requests.RequestException, ValueError):
+            gateway_error = True
+    return render_template("reviewer_otp.html", mobiles=allowed,
+                           selected=selected, code=code,
+                           gateway_error=gateway_error)
 
 
 # ---------------------------------------------------------------------------
