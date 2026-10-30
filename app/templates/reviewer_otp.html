@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Synthetic OTP viewer (reviewers only)</h2>
+<p class="note">Use this page only for the fictional test mobile numbers. First request an OTP through the portal's normal citizen login, then select the same mobile here. OTP verification is never bypassed.</p>
+<form method="post">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  <label>Fictional citizen mobile</label>
+  <select name="mobile" required>
+    {% for mobile in mobiles %}<option value="{{ mobile }}" {% if mobile == selected %}selected{% endif %}>{{ mobile }}</option>{% endfor %}
+  </select>
+  <p><button class="btn" type="submit">View latest delivered OTP</button></p>
+</form>
+{% if selected %}
+  <p><b>Selected synthetic mobile:</b> {{ selected }}</p>
+  {% if gateway_error %}
+    <p class="note">Simulated SMS gateway unavailable. Retry after checking its health.</p>
+  {% elif code %}
+    <p><b>Latest delivered OTP:</b> <code>{{ code }}</code></p>
+    <p class="note">The code expires after five minutes and can be used once. Request a new OTP if rejected.</p>
+  {% else %}
+    <p class="note">No delivered OTP found. Request one from the normal sign-in screen, then refresh here after a few seconds.</p>
+  {% endif %}
+{% endif %}
+<form method="post" action="{{ url_for('reviewer_otp_logout') }}">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  <button class="btn" type="submit">Sign out</button>
+</form>
+{% endblock %}
