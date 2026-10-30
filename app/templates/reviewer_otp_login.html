@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Synthetic test OTP access</h2>
+<p class="note">Authorized reviewers only. This login does not grant portal administrator access.</p>
+<form method="post">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  <label>Reviewer username</label><input type="text" name="username" required autocomplete="username">
+  <label>Reviewer password</label><input type="password" name="password" required autocomplete="current-password">
+  <p><button class="btn" type="submit">Sign in</button></p>
+</form>
+{% endblock %}
