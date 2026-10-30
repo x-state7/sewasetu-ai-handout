@@ -40,6 +40,7 @@ from flask import (Blueprint, request, jsonify, redirect, render_template, sessi
                    flash, url_for, abort)
 import app as portal
 from security_otp import issue_otp, verify_otp
+from reviewer_access import officer_subject
 from security_urls import allowed_client_metadata_url
 
 oauth = Blueprint("oauth", __name__)
@@ -388,7 +389,6 @@ def login():
                     )
 
                     return redirect(url_for("oauth.consent", rid=rid))
-                    return redirect(url_for("oauth.consent", rid=rid))
                 flash("Invalid or expired OTP.")
             else:
                 mobile = request.form.get("mobile", "").strip()
@@ -401,9 +401,10 @@ def login():
                     else:
                         flash("Please wait before requesting another OTP.")
         else:
-            if (portal.ADMIN_PASSWORD and request.form.get("username") == portal.ADMIN_USERNAME and
-                    request.form.get("password") == portal.ADMIN_PASSWORD):
-                _update_request(rid, subject="officer:" + portal.ADMIN_USERNAME)
+            officer = officer_subject(request.form.get("username", ""),
+                                      request.form.get("password", ""))
+            if officer:
+                _update_request(rid, subject=officer)
                 return redirect(url_for("oauth.consent", rid=rid))
             flash("Invalid credentials.")
     return render_template("oauth_login.html", rid=rid, role=role,
