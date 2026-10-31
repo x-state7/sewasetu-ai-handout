@@ -224,7 +224,7 @@ def create_application(cur, mobile, cleaned):
            (applicant_name, mobile, dob, gender, marital_status,
             husband_name, husband_employer, village, block, bank_account, ifsc,
             doc_path, status, submitted_at)
-           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'PENDING',%s)
+           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'PENDING',%s)
            RETURNING id""",
         (cleaned["applicant_name"], mobile, cleaned["dob"], cleaned["gender"],
          cleaned["marital_status"], cleaned["husband_name"], cleaned["husband_employer"],
