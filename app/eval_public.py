@@ -57,7 +57,12 @@ Fictional citizens, conversations, observed outcomes,
 and database assertions.
 </p>
 
-{% if report %}
+{% if reports %}
+<p>Recent verified evaluation runs (newest first). Only genuinely executed reports are shown.</p>
+{% for report in reports %}
+<section>
+<h2>Run {{ report.run_id }}</h2>
+<p>Environment: {{ report.environment | default('Not specified', true) }}</p>
 <p>
 Run: {{ report.run_id }} |
 {{ report.created_at }}
@@ -96,6 +101,8 @@ pass rate {{ report.summary.pass_rate }}%
 
 </section>
 {% endfor %}
+</section>
+{% endfor %}
 
 {% else %}
 <p>
@@ -109,9 +116,9 @@ No passes claimed.
 """
 
 
-def latest():
+def published_reports(limit=10):
     if REPORT_DIR.is_symlink() or not REPORT_DIR.exists():
-        return None
+        return []
 
     paths = sorted(
         (
@@ -128,6 +135,7 @@ def latest():
         reverse=True,
     )
 
+    result = []
     for path in paths:
         try:
             report = json.loads(
@@ -139,12 +147,20 @@ def latest():
                 and isinstance(report.get("results"), list)
                 and isinstance(report.get("summary"), dict)
             ):
-                return report
+                result.append(report)
+                if len(result) >= limit:
+                    break
 
         except (OSError, ValueError, AttributeError):
             continue
 
-    return None
+    return result
+
+
+def latest():
+    """Backward-compatible single-run accessor."""
+    result = published_reports(limit=1)
+    return result[0] if result else None
 
 
 @app.get("/eval-dashboard")
@@ -152,7 +168,7 @@ def dashboard():
     return (
         render_template_string(
             PAGE,
-            report=latest(),
+            reports=published_reports(),
         ),
         200,
         {
